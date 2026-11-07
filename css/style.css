@@ -274,3 +274,6 @@ textarea.in, input.in {
 }
 textarea.mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 14px; }
 .item .main[data-act] { cursor: pointer; }
+
+.pdfwrap { margin: 8px 0; }
+.pdfbox canvas.pdfpage { display: block; width: 100%; background: #fff; border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; }

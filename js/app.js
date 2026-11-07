@@ -677,7 +677,8 @@
     setView(`
       ${head}
       <div class="row" style="margin-bottom:6px"><span class="chip">${esc(CAT[it.cat].name)}</span>${qq.retry ? '<span class="chip warn">再挑戦</span>' : ''}${isNewItem && !answered ? '<span class="chip ok">NEW</span>' : ''}${it.title && it.kind !== 'A' ? `<b class="small">${esc(it.title)}</b>` : ''}</div>
-      ${it.src ? `<div class="small muted">出典：${esc(it.src)}</div>` : ''}
+      ${it.src ? `<div class="small muted">出典：${esc(it.src)}${it.ipa ? '（問題文はPDFから自動抽出）' : ''}</div>` : ''}
+      ${it.ipa ? `<div class="pdfwrap"><button class="btn" data-act="page" data-arg="${esc(it.id)}" data-label="📄 問題冊子を表示（${it.ipa.pages.map((n) => 'p.' + n).join('・')}）">📄 問題冊子を表示（${it.ipa.pages.map((n) => 'p.' + n).join('・')}）</button><div class="pdfbox"></div></div>` : ''}
       <div class="qtext">${esc(it.q)}</div>
       ${it.code ? `<pre class="code">${esc(it.code)}</pre>` : ''}
       <div class="choices">${choices}</div>
@@ -685,6 +686,7 @@
       ${examNav}
     `);
     if (exam) startTimer();
+    if (it.ipa && it.ipa.showPage) { const b = document.querySelector('[data-act=page]'); if (b) ACTIONS.page(it.id, b); }
   }
 
   function viewResult() {
@@ -890,8 +892,10 @@
     if (!(Number.isInteger(a) && a >= 0 && a < c.length)) throw new Error('正解の指定が不正です');
     const q = String(raw.q || '').trim();
     if (!q) throw new Error('問題文がありません');
-    const id = typeof raw.id === 'string' && raw.id.startsWith('u:') ? raw.id : newId();
-    return { id, cat, src: String(raw.src || '').trim(), q, code: String(raw.code || '').replace(/\s+$/, ''), c, a,
+    const id = typeof raw.id === 'string' && /^(u|ipa):/.test(raw.id) ? raw.id : newId();
+    const ipa = raw.ipa && typeof raw.ipa.file === 'string' && Array.isArray(raw.ipa.pages)
+      ? { file: raw.ipa.file, pages: raw.ipa.pages.filter((n) => Number.isInteger(n)).slice(0, 8), showPage: !!raw.ipa.showPage } : undefined;
+    return { id, cat, ipa, src: String(raw.src || '').trim(), q, code: String(raw.code || '').replace(/\s+$/, ''), c, a,
       e: String(raw.e || '').trim() || '（解説は未登録です。公開されている解答例や解説で理由を確認しましょう）' };
   }
   function upsertCustom(list) {
@@ -914,8 +918,116 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
+  /* ---------- IPA公開問題PDF ---------- */
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  let pdfjsPromise = null;
+  function loadPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (!pdfjsPromise) {
+      pdfjsPromise = new Promise((resolve, reject) => {
+        const sc = document.createElement('script');
+        sc.src = PDFJS + 'pdf.min.js';
+        sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; resolve(window.pdfjsLib); };
+        sc.onerror = () => { pdfjsPromise = null; reject(new Error('PDF読込み用のライブラリを取得できませんでした（初回はインターネット接続が必要です）')); };
+        document.head.appendChild(sc);
+      });
+    }
+    return pdfjsPromise;
+  }
+  // 取り込んだPDFは問題冊子の表示用に IndexedDB に保存する（この端末内のみ）
+  function idb() {
+    return new Promise((resolve, reject) => {
+      const rq = indexedDB.open('fesan', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('pdfs');
+      rq.onsuccess = () => resolve(rq.result);
+      rq.onerror = () => reject(rq.error);
+    });
+  }
+  async function pdfPut(key, data) {
+    const db = await idb();
+    await new Promise((res, rej) => { const tx = db.transaction('pdfs', 'readwrite'); tx.objectStore('pdfs').put(data, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  }
+  async function pdfGet(key) {
+    const db = await idb();
+    return new Promise((res, rej) => { const rq = db.transaction('pdfs').objectStore('pdfs').get(key); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+  }
+  async function pdfDel(key) {
+    const db = await idb();
+    await new Promise((res) => { const tx = db.transaction('pdfs', 'readwrite'); tx.objectStore('pdfs').delete(key); tx.oncomplete = res; tx.onerror = res; });
+  }
+  const pdfDocs = {};
+  async function renderPages(it, box) {
+    box.innerHTML = '<p class="small muted">問題冊子を読み込んでいます…</p>';
+    try {
+      const lib = await loadPdfJs();
+      if (!pdfDocs[it.ipa.file]) {
+        const data = await pdfGet(it.ipa.file);
+        if (!data) throw new Error('この端末に問題冊子のPDFが保存されていません。もう一度取り込んでください');
+        pdfDocs[it.ipa.file] = await lib.getDocument({ data: data.slice(0), isEvalSupported: false }).promise;
+      }
+      const doc = pdfDocs[it.ipa.file];
+      box.innerHTML = '';
+      const width = Math.min(box.clientWidth || 600, 900);
+      for (const n of it.ipa.pages) {
+        const page = await doc.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        const scale = width / base.width;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const vp = page.getViewport({ scale: scale * dpr });
+        const cv = document.createElement('canvas');
+        cv.width = vp.width; cv.height = vp.height;
+        cv.style.width = '100%'; cv.className = 'pdfpage';
+        box.appendChild(cv);
+        await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      }
+      const cap = document.createElement('p');
+      cap.className = 'small muted';
+      cap.textContent = '出典：' + it.src + '（問題冊子 ' + it.ipa.pages.map((n) => 'p.' + n).join('・') + '）';
+      box.appendChild(cap);
+    } catch (err) {
+      box.innerHTML = `<p class="small" style="color:var(--ng)">${esc(err.message)}</p>`;
+    }
+  }
+  async function importIpa(fileList) {
+    const files = [];
+    for (const f of fileList) files.push({ name: f.name, data: await f.arrayBuffer() });
+    const status = $('#ipa-status');
+    if (status) status.innerHTML = '<p class="small">PDFを解析しています…</p>';
+    try {
+      const lib = await loadPdfJs();
+      const res = await window.FE_IPA.importFiles(lib, files);
+      if (!res.sets.length) { status.innerHTML = `<p class="small" style="color:var(--ng)">${res.errors.map(esc).join('<br>') || '取り込める問題がありませんでした'}</p>`; return; }
+      const summary = res.sets.map((st) => `${st.label}：${st.questions.length}問`).join('\n');
+      if (!confirm('次の公開問題を取り込みます。\n\n' + summary + '\n\n問題文はPDFから自動で抽出するため、図表や空欄は「問題冊子を表示」で確認してください。')) { status.innerHTML = ''; return; }
+      const all = [];
+      for (const st of res.sets) {
+        await pdfPut(st.fileKey, st.data);
+        delete pdfDocs[st.fileKey];
+        st.questions.forEach((q) => all.push(normalizeQ(q)));
+      }
+      upsertCustom(all);
+      const warn = res.sets.flatMap((st) => st.warnings.map((w) => st.label + ' ' + w)).concat(res.errors);
+      toast(all.length + '問を取り込みました');
+      render();
+      const st2 = $('#ipa-status');
+      if (st2 && warn.length) st2.innerHTML = `<p class="small muted">${warn.map(esc).join('<br>')}</p>`;
+    } catch (err) {
+      if (status) status.innerHTML = `<p class="small" style="color:var(--ng)">${esc(err.message || '取り込みに失敗しました')}</p>`;
+    }
+  }
+
   function viewCustom() {
-    const list = S.custom.map((q) => BYID[q.id]).filter(Boolean);
+    const all = S.custom.map((q) => BYID[q.id]).filter(Boolean);
+    const list = all.filter((it) => !it.ipa);
+    const sets = {};
+    all.filter((it) => it.ipa).forEach((it) => { (sets[it.ipa.file] = sets[it.ipa.file] || []).push(it); });
+    const setRows = Object.keys(sets).sort().reverse().map((k) => {
+      const items = sets[k];
+      const seen = items.filter((it) => S.items[it.id]).length;
+      const m = k.match(/^r(\d+)-([AB])$/);
+      const name = m ? `令和${m[1]}年度 科目${m[2]} 公開問題` : k;
+      return `<div class="item"><div class="main" data-act="cset" data-arg="${esc(k)}"><div class="name">${esc(name)}</div><div class="sub">${items.length}問・学習済み ${seen}問</div></div><span class="chip">解く ›</span><button class="icon-btn" data-act="csetdel" data-arg="${esc(k)}">削除</button></div>`;
+    }).join('');
     const catOpts = Object.keys(CAT).map((k) => `<option value="${k}">${esc(CAT[k].name)}</option>`).join('');
     const rows = list.slice().reverse().map((it) => {
       const st = S.items[it.id];
@@ -933,7 +1045,20 @@
           <li>登録した問題は<b>この端末のブラウザ内だけ</b>に保存され、外部には送信されません。</li>
         </ul>
       </div>
-      ${list.length ? `<div style="margin:12px 0"><button class="btn primary big" data-act="cstudy">登録した問題を解く（${list.length}問）</button></div>` : ''}
+      ${all.length ? `<div style="margin:12px 0"><button class="btn primary big" data-act="cstudy">追加した問題を解く（${all.length}問）</button></div>` : ''}
+
+      <h2>IPAの公開問題PDFから取り込む</h2>
+      <div class="card">
+        <ol class="small tips mt0">
+          <li><a href="https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/index.html" target="_blank" rel="noopener">IPA「SG・FE公開問題」のページ</a>を開き、基本情報技術者試験の<b>問題冊子</b>と<b>解答例</b>のPDFをダウンロードする（科目A・科目Bとも、各年度で公開されています）</li>
+          <li>下のボタンから、問題冊子と解答例を<b>いっしょに</b>選ぶ（複数年度をまとめて選んでもOK）</li>
+        </ol>
+        <label class="btn primary" for="ipa-files">PDFを選んで取り込む</label>
+        <input type="file" id="ipa-files" accept="application/pdf,.pdf" multiple class="hide">
+        <div id="ipa-status"></div>
+        <p class="small muted">PDFはこの端末の中だけで解析・保存され、外部には送信されません（初回のみPDF読込み用ライブラリを取得します）。年度・問番号付きの出典が自動で付きます。分野は問題文から自動で推定します。</p>
+      </div>
+      ${setRows ? `<div class="list">${setRows}</div>` : ''}
 
       <h2>1問ずつ登録</h2>
       <div class="card">
@@ -961,6 +1086,7 @@
 
       ${list.length ? `<h2>登録した問題（${list.length}）</h2><div class="list">${rows}</div>` : ''}
     `);
+    $('#ipa-files').addEventListener('change', (e) => { if (e.target.files.length) importIpa(Array.from(e.target.files)); e.target.value = ''; });
     $('#cimp').addEventListener('change', (e) => {
       const f = e.target.files[0]; if (!f) return;
       const rd = new FileReader();
@@ -1074,6 +1200,21 @@
       delete S.items[a];
       rebuildItems(); save(); render();
     },
+    cset: (a) => startSession(buildFromPool(ITEMS.filter((i) => i.ipa && i.ipa.file === a), 20).sort((x, y) => x.id.localeCompare(y.id, 'en', { numeric: true })), { title: '公開問題' }),
+    csetdel: (a) => {
+      if (!confirm('この年度・科目の取り込んだ問題を削除しますか？（学習記録も削除されます）')) return;
+      S.custom = S.custom.filter((q) => !(q.ipa && q.ipa.file === a));
+      pdfDel(a).catch(() => {}); delete pdfDocs[a];
+      rebuildItems();
+      Object.keys(S.items).forEach((id) => { if (id.startsWith('ipa:') && !BYID[id]) delete S.items[id]; });
+      save(); render();
+    },
+    page: (a, el) => {
+      const box = el.parentElement.querySelector('.pdfbox');
+      if (box.dataset.open) { box.dataset.open = ''; box.innerHTML = ''; el.textContent = el.dataset.label; return; }
+      box.dataset.open = '1'; el.textContent = '📄 問題冊子を閉じる';
+      renderPages(BYID[a], box);
+    },
     cstudy: () => startSession(interleave(buildFromPool(ITEMS.filter((i) => i.custom), 20)), { title: '登録した問題' }),
     ctpl: () => download('fesan-questions-template.json', CUSTOM_TEMPLATE),
     cexp: () => download('fesan-questions-' + dayKey() + '.json', { format: 'fesan-questions-v1', questions: S.custom }),
@@ -1099,7 +1240,7 @@
     const el = e.target.closest('[data-act]');
     if (!el || el.disabled) return;
     const fn = ACTIONS[el.dataset.act];
-    if (fn) { e.preventDefault(); fn(el.dataset.arg); }
+    if (fn) { e.preventDefault(); fn(el.dataset.arg, el); }
   });
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
