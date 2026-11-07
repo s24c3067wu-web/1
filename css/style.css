@@ -267,3 +267,10 @@ details.wrongq .exp { white-space: pre-wrap; font-size: 14px; }
   .kpi .v { font-size: 19px; }
   .item .meter { width: 64px; flex-basis: 64px; }
 }
+
+textarea.in, input.in {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 8px 12px; width: 100%; min-height: 44px; resize: vertical;
+}
+textarea.mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 14px; }
+.item .main[data-act] { cursor: pointer; }

@@ -15,22 +15,27 @@
   CATS.forEach((c) => { CAT[c.id] = c; });
   CAT['b-algo'] = { id: 'b-algo', name: '科目B アルゴリズム', field: '科目B', w: 16 };
   CAT['b-sec'] = { id: 'b-sec', name: '科目B 情報セキュリティ', field: '科目B', w: 4 };
-  const LABELS = ['ア', 'イ', 'ウ', 'エ'];
+  const LABELS = ['ア', 'イ', 'ウ', 'エ', 'オ', 'カ', 'キ', 'ク', 'ケ', 'コ'];
   const DAY = 86400000;
 
-  const ITEMS = [];
-  const BYID = {};
-  window.FE_QA.forEach((q) => { const it = Object.assign({ kind: 'A' }, q); ITEMS.push(it); BYID[it.id] = it; });
-  window.FE_QB.forEach((q) => { const it = Object.assign({ kind: 'B' }, q); ITEMS.push(it); BYID[it.id] = it; });
-  const ITEMS_A = ITEMS.filter((i) => i.kind === 'A');
-  const ITEMS_B = ITEMS.filter((i) => i.kind === 'B');
+  // 収録問題＋利用者が追加した問題（過去問など）。追加・削除のたびに作り直す
+  let ITEMS = [], BYID = {}, ITEMS_A = [], ITEMS_B = [];
+  function rebuildItems() {
+    ITEMS = []; BYID = {};
+    const add = (it) => { ITEMS.push(it); BYID[it.id] = it; };
+    window.FE_QA.forEach((q) => add(Object.assign({ kind: 'A' }, q)));
+    window.FE_QB.forEach((q) => add(Object.assign({ kind: 'B' }, q)));
+    (S.custom || []).forEach((q) => add(Object.assign({ kind: q.cat.startsWith('b-') ? 'B' : 'A', custom: true }, q)));
+    ITEMS_A = ITEMS.filter((i) => i.kind === 'A');
+    ITEMS_B = ITEMS.filter((i) => i.kind === 'B');
+  }
   const TERMS = window.FE_TERMS.map((t) => Object.assign({ id: 'term:' + t.t }, t));
   const DRILLS = window.FE_DRILLS;
 
   /* ---------- 保存 ---------- */
   const KEY = 'fesan-v1';
   function defaultState() {
-    return { v: 1, items: {}, terms: {}, log: {}, drills: {}, exams: [], marks: {},
+    return { v: 1, items: {}, terms: {}, log: {}, drills: {}, exams: [], marks: {}, custom: [],
       settings: { examDate: '', goal: 20, includeB: true }, created: Date.now() };
   }
   function load() {
@@ -45,6 +50,8 @@
     return defaultState();
   }
   let S = load();
+  if (!Array.isArray(S.custom)) S.custom = [];
+  rebuildItems();
   let saveWarned = false;
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {
@@ -251,12 +258,14 @@
   function startSession(items, opts) {
     if (!items.length) { toast('出題できる問題がありません'); return; }
     SES = Object.assign({ mode: 'practice', title: '演習', retry: true, timeLimit: 0, examType: null }, opts, {
-      q: items.map((it) => ({ item: it, order: shuffle([0, 1, 2, 3].slice(0, it.c.length)), ans: null, grade: null, flag: false, retry: false, ms: 0 })),
+      q: items.map((it) => ({ item: it, order: choiceOrder(it), ans: null, grade: null, flag: false, retry: false, ms: 0 })),
       idx: 0, startedAt: Date.now(), shownAt: Date.now(), done: false
     });
     location.hash = '#/quiz';
     render();
   }
+  // 追加した過去問は解説が「正解はエ」のように記号を使うことが多いので、選択肢を並べ替えない
+  function choiceOrder(it) { const o = it.c.map((_, i) => i); return it.custom ? o : shuffle(o); }
   function curQ() { return SES.q[SES.idx]; }
   function isCorrect(qq) { return qq.ans !== null && qq.order[qq.ans] === qq.item.a; }
 
@@ -294,7 +303,7 @@
   }
   function queueRetry(qq, regenerate) {
     const item = regenerate ? makeDrill(qq.item.dtype) : qq.item;
-    SES.q.push({ item, order: shuffle([0, 1, 2, 3].slice(0, item.c.length)), ans: null, grade: null, flag: false, retry: true, ms: 0 });
+    SES.q.push({ item, order: choiceOrder(item), ans: null, grade: null, flag: false, retry: true, ms: 0 });
   }
   function grade(g) {
     const qq = curQ();
@@ -478,6 +487,7 @@
         <a class="mode" href="#/stats"><div class="t"><span class="emoji">📈</span>成績・分析</div><div class="d">分野別の習熟度と推移</div></a>
         <a class="mode" href="#/about"><div class="t"><span class="emoji">💡</span>学習のコツ</div><div class="d">このアプリの使い方と勉強法</div></a>
       </div>
+      <div class="list" style="margin-top:10px"><a class="item" href="#/custom"><span class="emoji">📝</span><div class="main"><div class="name">過去問を追加して解く</div><div class="sub">IPAの公開問題などを登録すると、復習や模試にも組み込まれます</div></div><span class="chip">${S.custom.length}問</span></a></div>
     `);
   }
 
@@ -667,6 +677,7 @@
     setView(`
       ${head}
       <div class="row" style="margin-bottom:6px"><span class="chip">${esc(CAT[it.cat].name)}</span>${qq.retry ? '<span class="chip warn">再挑戦</span>' : ''}${isNewItem && !answered ? '<span class="chip ok">NEW</span>' : ''}${it.title && it.kind !== 'A' ? `<b class="small">${esc(it.title)}</b>` : ''}</div>
+      ${it.src ? `<div class="small muted">出典：${esc(it.src)}</div>` : ''}
       <div class="qtext">${esc(it.q)}</div>
       ${it.code ? `<pre class="code">${esc(it.code)}</pre>` : ''}
       <div class="choices">${choices}</div>
@@ -820,7 +831,8 @@
           if (!confirm('現在の学習記録を、バックアップの内容で置き換えますか？')) return;
           const d = defaultState();
           S = Object.assign(d, s, { settings: Object.assign(d.settings, s.settings) });
-          save(); toast('復元しました'); render();
+          if (!Array.isArray(S.custom)) S.custom = [];
+          rebuildItems(); save(); toast('復元しました'); render();
         } catch (err) { toast('バックアップファイルを読み込めませんでした'); }
       };
       rd.readAsText(f);
@@ -865,6 +877,110 @@
     `);
   }
 
+  /* ---------- 追加問題（過去問など） ---------- */
+  function newId() { return 'u:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function normalizeQ(raw) {
+    if (!raw || typeof raw !== 'object') throw new Error('問題の形式が不正です');
+    const cat = String(raw.cat || '').trim();
+    if (!CAT[cat]) throw new Error('分野ID「' + cat + '」は使えません');
+    const c = Array.isArray(raw.c) ? raw.c.map((x) => String(x).trim()).filter(Boolean) : [];
+    if (c.length < 2 || c.length > 10) throw new Error('選択肢は2〜10個にしてください');
+    let a = raw.a;
+    if (typeof a === 'string') { const k = LABELS.indexOf(a.trim()); a = k >= 0 ? k : parseInt(a, 10); }
+    if (!(Number.isInteger(a) && a >= 0 && a < c.length)) throw new Error('正解の指定が不正です');
+    const q = String(raw.q || '').trim();
+    if (!q) throw new Error('問題文がありません');
+    const id = typeof raw.id === 'string' && raw.id.startsWith('u:') ? raw.id : newId();
+    return { id, cat, src: String(raw.src || '').trim(), q, code: String(raw.code || '').replace(/\s+$/, ''), c, a,
+      e: String(raw.e || '').trim() || '（解説は未登録です。公開されている解答例や解説で理由を確認しましょう）' };
+  }
+  function upsertCustom(list) {
+    list.forEach((q) => {
+      const k = S.custom.findIndex((x) => x.id === q.id);
+      if (k >= 0) S.custom[k] = q; else S.custom.push(q);
+    });
+    rebuildItems(); save();
+  }
+  const CUSTOM_TEMPLATE = {
+    format: 'fesan-questions-v1',
+    note: 'cat は分野ID（' + Object.keys(CAT).join(', ') + '）。a は正解の記号（ア〜コ）か0始まりの番号。code・e・src は省略可。',
+    questions: [{ cat: 'nw', src: '令和○年度 基本情報技術者試験 科目A 問○（出典をここに書く）', q: '（問題文）', c: ['（選択肢ア）', '（選択肢イ）', '（選択肢ウ）', '（選択肢エ）'], a: 'ウ', e: '（解説）' }]
+  };
+  function download(name, obj) {
+    const blob = new Blob([JSON.stringify(obj, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function viewCustom() {
+    const list = S.custom.map((q) => BYID[q.id]).filter(Boolean);
+    const catOpts = Object.keys(CAT).map((k) => `<option value="${k}">${esc(CAT[k].name)}</option>`).join('');
+    const rows = list.slice().reverse().map((it) => {
+      const st = S.items[it.id];
+      const chip = !st ? '<span class="chip">未学習</span>' : st.last === 'ng' ? '<span class="chip ng">要復習</span>' : st.last === 'guess' ? '<span class="chip warn">あいまい</span>' : '<span class="chip ok">正解</span>';
+      return `<div class="item"><div class="main" data-act="one" data-arg="${esc(it.id)}"><div class="name">${esc(it.q.slice(0, 40))}${it.q.length > 40 ? '…' : ''}</div><div class="sub">${esc(CAT[it.cat].name)}${it.src ? '・' + esc(it.src) : ''}</div></div>${chip}<button class="icon-btn" data-act="cdel" data-arg="${esc(it.id)}" aria-label="削除">削除</button></div>`;
+    }).join('');
+    setView(`
+      <h1>過去問を追加して解く</h1>
+      ${hello('IPAが公開している過去問題やサンプル問題を登録すると、ほかの問題と同じように<b>間隔をあけた復習・苦手克服・模擬試験</b>に組み込まれるよ。登録した問題は、解説の記号とずれないように選択肢を並べ替えずに出すね。')}
+      <div class="card small">
+        <b>過去問の入手と利用について</b>
+        <ul class="tips">
+          <li>過去問題・解答例は IPA（情報処理推進機構）の公式サイトの「過去問題」ページで公開されています。</li>
+          <li>利用条件は必ず IPA の案内を確認し、<b>出典</b>欄に「令和○年度 基本情報技術者試験 科目A 問○」のように記入してください。</li>
+          <li>登録した問題は<b>この端末のブラウザ内だけ</b>に保存され、外部には送信されません。</li>
+        </ul>
+      </div>
+      ${list.length ? `<div style="margin:12px 0"><button class="btn primary big" data-act="cstudy">登録した問題を解く（${list.length}問）</button></div>` : ''}
+
+      <h2>1問ずつ登録</h2>
+      <div class="card">
+        <label class="f" for="cf-cat">分野</label><select id="cf-cat">${catOpts}</select>
+        <label class="f" for="cf-src">出典</label><input id="cf-src" class="in" placeholder="例：令和○年度 基本情報技術者試験 科目A 問○" value="${esc(S.settings.lastSrc || '')}">
+        <label class="f" for="cf-q">問題文</label><textarea id="cf-q" class="in" rows="5"></textarea>
+        <label class="f" for="cf-code">プログラム（科目Bの擬似言語など・任意）</label><textarea id="cf-code" class="in mono" rows="5"></textarea>
+        <label class="f" for="cf-c">選択肢（1行に1つ、ア・イ・ウ…の順。記号は不要）</label><textarea id="cf-c" class="in" rows="4"></textarea>
+        <label class="f" for="cf-a">正解</label><select id="cf-a">${LABELS.map((l, i) => `<option value="${i}">${l}</option>`).join('')}</select>
+        <label class="f" for="cf-e">解説（任意）</label><textarea id="cf-e" class="in" rows="3"></textarea>
+        <div class="row" style="margin-top:12px"><button class="btn primary grow" data-act="cadd">登録する</button></div>
+        <p class="small muted">図や表が必要な問題は、問題文に「（図は問題冊子 p.○ を参照）」のように書いておくと便利です。</p>
+      </div>
+
+      <h2>ファイルでまとめて登録</h2>
+      <div class="card">
+        <p class="small muted mt0">JSON形式でまとめて読み込めます。まずテンプレートを保存して形式を確認してください。同じIDの問題は上書きされます。</p>
+        <div class="row">
+          <button class="btn" data-act="ctpl">テンプレートを保存</button>
+          <label class="btn" for="cimp">JSONを読み込む</label>
+          <input type="file" id="cimp" accept="application/json,.json" class="hide">
+          ${list.length ? '<button class="btn" data-act="cexp">登録した問題を書き出す</button>' : ''}
+        </div>
+      </div>
+
+      ${list.length ? `<h2>登録した問題（${list.length}）</h2><div class="list">${rows}</div>` : ''}
+    `);
+    $('#cimp').addEventListener('change', (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const data = JSON.parse(rd.result);
+          const arr = Array.isArray(data) ? data : data && Array.isArray(data.questions) ? data.questions : null;
+          if (!arr) throw new Error('questions 配列が見つかりません');
+          const ok = [], ng = [];
+          arr.forEach((raw, i) => { try { ok.push(normalizeQ(raw)); } catch (err) { ng.push((i + 1) + '問目：' + err.message); } });
+          if (ok.length) upsertCustom(ok);
+          if (ng.length) alert(ok.length + '問を登録しました。\n読み込めなかった問題：\n' + ng.slice(0, 10).join('\n') + (ng.length > 10 ? '\n…ほか' + (ng.length - 10) + '件' : ''));
+          else toast(ok.length + '問を登録しました');
+          render();
+        } catch (err) { toast('読み込めませんでした：' + err.message); }
+      };
+      rd.readAsText(f);
+    });
+  }
+
   /* ---------- ルーティング ---------- */
   function route() { return (location.hash || '#/').replace(/^#/, ''); }
   function render() {
@@ -881,6 +997,7 @@
       case '/stats': viewStats(); break;
       case '/settings': viewSettings(); break;
       case '/about': viewAbout(); break;
+      case '/custom': viewCustom(); break;
       case '/quiz': if (SES && !SES.done) renderQuiz(); else location.hash = '#/'; break;
       case '/result': viewResult(); break;
       default: viewHome();
@@ -939,6 +1056,27 @@
       cards.sort((x, y) => ((S.terms[x.id] ? S.terms[x.id].due : 0) - (S.terms[y.id] ? S.terms[y.id].due : 0)) || (x.id < y.id ? -1 : 1));
       startFlash(cards.filter((c) => !S.terms[c.id] || S.terms[c.id].due <= now + DAY * 3).concat(cards).filter((c, i, arr) => arr.indexOf(c) === i).slice(0, 15), S.settings.termReverse);
     },
+    cadd: () => {
+      const v = (id) => $(id).value;
+      try {
+        const q = normalizeQ({ cat: v('#cf-cat'), src: v('#cf-src'), q: v('#cf-q'), code: v('#cf-code'), c: v('#cf-c').split('\n'), a: parseInt(v('#cf-a'), 10), e: v('#cf-e') });
+        S.settings.lastSrc = q.src;
+        upsertCustom([q]);
+        toast('登録しました（全' + S.custom.length + '問）');
+        const keepCat = v('#cf-cat');
+        render();
+        $('#cf-cat').value = keepCat;
+      } catch (err) { toast(err.message); }
+    },
+    cdel: (a) => {
+      if (!confirm('この問題を削除しますか？')) return;
+      S.custom = S.custom.filter((q) => q.id !== a);
+      delete S.items[a];
+      rebuildItems(); save(); render();
+    },
+    cstudy: () => startSession(interleave(buildFromPool(ITEMS.filter((i) => i.custom), 20)), { title: '登録した問題' }),
+    ctpl: () => download('fesan-questions-template.json', CUSTOM_TEMPLATE),
+    cexp: () => download('fesan-questions-' + dayKey() + '.json', { format: 'fesan-questions-v1', questions: S.custom }),
     flip: () => { if (!FS.flipped) { FS.flipped = true; render(); } },
     fg: (a) => flashGrade(parseInt(a, 10)),
     fquit: () => { FS = null; location.hash = '#/terms'; },
@@ -951,9 +1089,10 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     },
     reset: () => {
-      if (!confirm('学習記録をすべて削除します。元に戻せません。よろしいですか？')) return;
+      if (!confirm('学習記録をすべて削除します（登録した過去問は残ります）。元に戻せません。よろしいですか？')) return;
       const keep = S.settings;
-      S = defaultState(); S.settings = keep; save(); toast('削除しました'); location.hash = '#/'; render();
+      const custom = S.custom;
+      S = defaultState(); S.settings = keep; S.custom = custom; save(); toast('削除しました'); location.hash = '#/'; render();
     }
   };
   document.addEventListener('click', (e) => {
@@ -970,9 +1109,9 @@
     if (r === '/quiz' && SES && !SES.done) {
       const qq = curQ();
       const exam = SES.mode === 'exam';
-      const map = { '1': 0, '2': 1, '3': 2, '4': 3, a: 0, b: 1, c: 2, d: 3 };
+      const map = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '8': 7, '9': 8, '0': 9, a: 0, b: 1, c: 2, d: 3 };
       if (exam) {
-        if (k in map) { answer(map[k]); e.preventDefault(); }
+        if (k in map && map[k] < qq.item.c.length) { answer(map[k]); e.preventDefault(); }
         else if (k === 'ArrowRight') ACTIONS.enext();
         else if (k === 'ArrowLeft') ACTIONS.prev();
         return;
