@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <path d="M14 18 L10 4 L24 12 Z" fill="#4c6ef5"/><path d="M50 18 L54 4 L40 12 Z" fill="#4c6ef5"/>
+  <circle cx="32" cy="35" r="25" fill="#5c7cfa"/>
+  <circle cx="32" cy="38" r="19" fill="#edf2ff"/>
+  <circle cx="24" cy="33" r="6.5" fill="none" stroke="#1d2433" stroke-width="2"/>
+  <circle cx="40" cy="33" r="6.5" fill="none" stroke="#1d2433" stroke-width="2"/>
+  <path d="M30.5 33 h3" stroke="#1d2433" stroke-width="2"/>
+  <circle cx="24" cy="33" r="2.4" fill="#1d2433"/><circle cx="40" cy="33" r="2.4" fill="#1d2433"/>
+  <circle cx="17" cy="42" r="2.6" fill="#ffa8a8" opacity=".8"/><circle cx="47" cy="42" r="2.6" fill="#ffa8a8" opacity=".8"/>
+  <path d="M24 41 q8 8 16 0" stroke="#1d2433" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+  <rect x="22" y="10" width="20" height="11" rx="3" fill="#ffd43b"/>
+  <text x="32" y="18.6" font-size="8.5" font-weight="800" text-anchor="middle" fill="#1d2433" font-family="system-ui,sans-serif">FE</text>
+</svg>

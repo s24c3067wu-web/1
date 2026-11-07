@@ -1,0 +1,16 @@
+{
+  "name": "えふいーさん - 基本情報技術者試験 対策",
+  "short_name": "えふいーさん",
+  "description": "間隔反復と確信度評価で効率よく基本情報技術者試験の合格を目指す学習アプリ",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#3b5bdb",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
