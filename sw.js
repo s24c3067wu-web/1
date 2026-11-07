@@ -1,5 +1,5 @@
 /* えふいーさん Service Worker：オフラインでも使えるようにアプリ本体をキャッシュする */
-const CACHE = 'fesan-v2';
+const CACHE = 'fesan-v3';
 const LIB = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/';
 const FILES = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',

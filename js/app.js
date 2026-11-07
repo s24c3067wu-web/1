@@ -30,6 +30,34 @@
     ITEMS_B = ITEMS.filter((i) => i.kind === 'B');
   }
   const TERMS = window.FE_TERMS.map((t) => Object.assign({ id: 'term:' + t.t }, t));
+
+  /* ---------- 用語のタップ表示 ---------- */
+  // 用語名（「A / B」は両方）と別名から、本文中の用語を見つける正規表現を作る
+  const GLOSS_SKIP = new Set(['選択']); // 一般的な語と紛らわしいもの
+  const ALIAS = new Map();
+  TERMS.forEach((t, ti) => {
+    t.t.split(/\s*\/\s*/).concat(t.al || []).forEach((n) => {
+      n = n.trim();
+      if (n.length >= 2 && !GLOSS_SKIP.has(n) && !ALIAS.has(n)) ALIAS.set(n, ti);
+    });
+  });
+  const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const GLOSS_RE = new RegExp(Array.from(ALIAS.keys()).sort((a, b) => b.length - a.length)
+    .map((n) => (/^[A-Za-z0-9]/.test(n) ? '(?<![A-Za-z0-9])' : '') + reEsc(n) + (/[A-Za-z0-9]$/.test(n) ? '(?![A-Za-z0-9])' : '')).join('|'), 'g');
+  // テキストをエスケープし、用語をタップできる要素で囲む（同じ用語は最初の1回だけ）
+  function linkTerms(text, skipTi) {
+    text = String(text == null ? '' : text);
+    let out = '', last = 0;
+    const used = new Set(skipTi == null ? [] : [skipTi]);
+    for (const m of text.matchAll(GLOSS_RE)) {
+      const ti = ALIAS.get(m[0]);
+      out += esc(text.slice(last, m.index));
+      if (ti === undefined || used.has(ti)) out += esc(m[0]);
+      else { used.add(ti); out += `<span class="term" role="button" tabindex="0" data-act="term" data-arg="${ti}">${esc(m[0])}</span>`; }
+      last = m.index + m[0].length;
+    }
+    return out + esc(text.slice(last));
+  }
   const DRILLS = window.FE_DRILLS;
 
   /* ---------- 保存 ---------- */
@@ -308,6 +336,7 @@
   function grade(g) {
     const qq = curQ();
     if (qq.grade !== null || qq.ans === null) return;
+    if (qq.hint && g === 3) g = 2;
     qq.grade = g;
     const st = S.items[qq.item.id] = schedule(S.items[qq.item.id], g, Date.now());
     logAdd('n', 1); logAdd('ok', 1); logAdd('ms', qq.ms);
@@ -413,10 +442,52 @@
     '計算問題は公式を覚えるより、何度も解いて手に覚えさせるのが近道だよ。',
     '分野をまぜて解くと、本番で「どの知識を使うか」を選ぶ力がつくよ。',
     '間違えた問題は、その場でもう一回出すよ。すぐに解き直すと定着しやすいんだ。',
-    'セキュリティは科目Aでも科目Bでも出る重要分野。重点的にいこう！'
+    'セキュリティは科目Aでも科目Bでも出る重要分野。重点的にいこう！',
+    '問題文や解説の<u>点線の付いた用語</u>をタップすると、その場で意味を確認できるよ。'
   ];
 
   /* ---------- 画面 ---------- */
+  function termPop() {
+    let el = $('#termpop');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'termpop';
+      el.innerHTML = '<div class="tp-back" data-act="termclose"></div><div class="tp-sheet" role="dialog" aria-modal="true" aria-labelledby="tp-title"></div>';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function closeTerm() { const el = $('#termpop'); if (el) el.classList.remove('show'); }
+  function showTerm(ti, opts) {
+    const t = TERMS[ti];
+    if (!t) return;
+    const el = termPop();
+    const sheet = el.querySelector('.tp-sheet');
+    const inDeck = !!S.terms[t.id];
+    if (opts && opts.warn) {
+      sheet.innerHTML = `<div class="tp-head"><b id="tp-title">${esc(t.t)}</b><button class="icon-btn" data-act="termclose" aria-label="閉じる">✕</button></div>
+        <p class="small">まだ解答していません。用語の説明を見ると、答えがわかってしまうことがあります。</p>
+        <p class="small muted">見た場合、この問題で正解しても「自信あり」ではなく「迷った」として記録し、早めに復習します。</p>
+        <div class="row"><button class="btn primary grow" data-act="termforce" data-arg="${ti}">説明を見る</button><button class="btn grow" data-act="termclose">やめておく</button></div>`;
+    } else {
+      sheet.innerHTML = `<div class="tp-head"><b id="tp-title" style="font-size:18px">${esc(t.t)}</b><button class="icon-btn" data-act="termclose" aria-label="閉じる">✕</button></div>
+        <div style="margin:2px 0 8px"><span class="chip">${esc(CAT[t.cat].name)}</span></div>
+        <div class="tp-body">${linkTerms(t.d, ti)}</div>
+        <div class="row" style="margin-top:12px">
+          ${inDeck ? '<span class="small muted grow">用語カードで復習中</span>' : `<button class="btn grow" data-act="termadd" data-arg="${ti}">🃏 カードに追加</button>`}
+          <button class="btn primary grow" data-act="termclose">閉じる</button>
+        </div>`;
+    }
+    el.classList.add('show');
+    const f = sheet.querySelector('.btn.primary');
+    if (f) f.focus({ preventScroll: true });
+  }
+  // 練習中・未解答の問題文の用語は、答えのヒントになりうるので確認してから表示する
+  function onTermTap(ti, fromQuestion) {
+    const qq = route() === '/quiz' && SES && !SES.done ? curQ() : null;
+    showTerm(ti, { warn: !!(qq && qq.ans === null && fromQuestion) });
+  }
+
   function setView(html) { $('#app').innerHTML = html; }
   function meter(v, cls) {
     const c = cls || (v >= 0.7 ? 'ok' : v >= 0.4 ? '' : v > 0 ? 'warn' : '');
@@ -605,7 +676,7 @@
     }
     const c = FS.cards[FS.idx];
     const front = FS.reverse ? esc(c.d) : esc(c.t);
-    const back = FS.reverse ? esc(c.t) : esc(c.d);
+    const back = FS.reverse ? esc(c.t) : linkTerms(c.d, TERMS.findIndex((t) => t.id === c.id));
     const remain = FS.cards.length - FS.idx;
     setView(`
       <div class="qhead"><button class="icon-btn" data-act="fquit" aria-label="終了">✕</button>${meter(FS.idx / FS.cards.length)}<span class="qnum">残り ${remain}</span></div>
@@ -645,9 +716,9 @@
     let fb = '';
     if (reveal) {
       const correctLabel = LABELS[qq.order.indexOf(it.a)];
-      fb = `<div class="feedback ${ok ? 'ok' : 'ng'}"><div class="verdict">${ok ? '⭕ 正解！' : '❌ 不正解… 正解は「' + correctLabel + '」'}</div><div class="exp">${esc(it.e)}</div></div>`;
+      fb = `<div class="feedback ${ok ? 'ok' : 'ng'}"><div class="verdict">${ok ? '⭕ 正解！' : '❌ 不正解… 正解は「' + correctLabel + '」'}</div><div class="exp">${linkTerms(it.e)}</div></div>`;
       if (ok && !qq.retry && it.kind !== 'D' && qq.grade === null) {
-        fb += `<div class="small muted center">どのくらい自信があった？（正直に答えるほど復習が最適化されます）</div>
+        fb += `${qq.hint ? '<div class="small center" style="color:var(--warn)">解答前に用語の説明を見たので、「自信あり」は「迷った」として記録します</div>' : ''}<div class="small muted center">どのくらい自信があった？（正直に答えるほど復習が最適化されます）</div>
           <div class="conf">
             <button class="btn primary" data-act="grade" data-arg="3">自信あり<small>理由も説明できる</small></button>
             <button class="btn" data-act="grade" data-arg="2">迷った<small>なんとなく</small></button>
@@ -679,7 +750,7 @@
       <div class="row" style="margin-bottom:6px"><span class="chip">${esc(CAT[it.cat].name)}</span>${qq.retry ? '<span class="chip warn">再挑戦</span>' : ''}${isNewItem && !answered ? '<span class="chip ok">NEW</span>' : ''}${it.title && it.kind !== 'A' ? `<b class="small">${esc(it.title)}</b>` : ''}</div>
       ${it.src ? `<div class="small muted">出典：${esc(it.src)}${it.ipa ? '（問題文はPDFから自動抽出）' : ''}</div>` : ''}
       ${it.ipa ? `<div class="pdfwrap"><button class="btn" data-act="page" data-arg="${esc(it.id)}" data-label="📄 問題冊子を表示（${it.ipa.pages.map((n) => 'p.' + n).join('・')}）">📄 問題冊子を表示（${it.ipa.pages.map((n) => 'p.' + n).join('・')}）</button><div class="pdfbox"></div></div>` : ''}
-      <div class="qtext">${esc(it.q)}</div>
+      <div class="qtext">${exam ? esc(it.q) : linkTerms(it.q)}</div>
       ${it.code ? `<pre class="code">${esc(it.code)}</pre>` : ''}
       <div class="choices">${choices}</div>
       ${fb}
@@ -709,9 +780,9 @@
       const yours = x.ans === null ? '未解答' : LABELS[x.ans] + '：' + it.c[x.order[x.ans]];
       const corr = LABELS[x.order.indexOf(it.a)] + '：' + it.c[it.a];
       return `<details class="wrongq"><summary>${esc(it.title || CAT[it.cat].name)}：${esc(it.q.slice(0, 40))}${it.q.length > 40 ? '…' : ''}</summary>
-        <div class="qtext small" style="margin-top:8px">${esc(it.q)}</div>${it.code ? `<pre class="code">${esc(it.code)}</pre>` : ''}
+        <div class="qtext small" style="margin-top:8px">${linkTerms(it.q)}</div>${it.code ? `<pre class="code">${esc(it.code)}</pre>` : ''}
         <p class="small"><span class="chip ng">あなたの解答</span> ${esc(yours)}<br><span class="chip ok">正解</span> ${esc(corr)}</p>
-        <div class="exp">${esc(it.e)}</div></details>`;
+        <div class="exp">${linkTerms(it.e)}</div></details>`;
     }).join('');
     const pass = r >= 0.6;
     let msg;
@@ -854,7 +925,9 @@
         <p class="small">正解したら「自信あり／迷った／勘」を選びます。勘で当たった問題は未習得として翌日に出します。正直に押すほど、あなた専用の復習計画になります。</p>
         <h3>④ 交互学習（分野をまぜる）</h3>
         <p class="small">「今日の学習」は同じ分野が続かないように並べます。本番と同じく「どの知識を使う問題か」を判断する力がつきます。</p>
-        <h3>⑤ 弱点と配点を重視</h3>
+        <h3>⑤ 用語をその場で確認</h3>
+        <p class="small">問題文や解説の点線付きの用語をタップすると意味が表示されます。気になった用語は「用語カードに追加」で復習に回せます。未解答の問題文の用語は答えのヒントになりうるため、確認してから表示し、その問題は早めに復習します（模擬試験では表示されません）。</p>
+        <h3>⑥ 弱点と配点を重視</h3>
         <p class="small">新しい問題は「本番での出題数が多い」かつ「習熟度が低い」分野から優先して出します。セキュリティや科目Bのアルゴリズムは特に配点が大きい分野です。</p>
       </div>
       <h2>おすすめの使い方</h2>
@@ -1218,6 +1291,19 @@
     cstudy: () => startSession(interleave(buildFromPool(ITEMS.filter((i) => i.custom), 20)), { title: '登録した問題' }),
     ctpl: () => download('fesan-questions-template.json', CUSTOM_TEMPLATE),
     cexp: () => download('fesan-questions-' + dayKey() + '.json', { format: 'fesan-questions-v1', questions: S.custom }),
+    term: (a, el) => {
+      onTermTap(parseInt(a, 10), !!(el && el.closest('.qtext')));
+    },
+    termforce: (a) => {
+      if (route() === '/quiz' && SES && !SES.done) { const qq = curQ(); if (qq.ans === null) qq.hint = true; }
+      showTerm(parseInt(a, 10));
+    },
+    termclose: () => closeTerm(),
+    termadd: (a) => {
+      const t = TERMS[parseInt(a, 10)];
+      if (!S.terms[t.id]) S.terms[t.id] = { n: 0, iv: 0, ef: 2.5, due: Date.now(), lapses: 0, seen: 0, ok: 0, hist: [] };
+      save(); toast('用語カードに追加しました'); showTerm(parseInt(a, 10));
+    },
     flip: () => { if (!FS.flipped) { FS.flipped = true; render(); } },
     fg: (a) => flashGrade(parseInt(a, 10)),
     fquit: () => { FS = null; location.hash = '#/terms'; },
@@ -1243,6 +1329,14 @@
     if (fn) { e.preventDefault(); fn(el.dataset.arg, el); }
   });
   document.addEventListener('keydown', (e) => {
+    const pop = $('#termpop');
+    if (pop && pop.classList.contains('show')) {
+      if (e.key === 'Escape') { closeTerm(); e.preventDefault(); }
+      return;
+    }
+    if (e.target && e.target.classList && e.target.classList.contains('term') && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault(); ACTIONS.term(e.target.dataset.arg, e.target); return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
     const r = route();

@@ -30,6 +30,14 @@ FE_TERMS.forEach((t) => {
   if (!cats.has(t.cat)) errors.push(`用語 ${t.t}: 不明な分野 ${t.cat}`);
   if (!t.d) errors.push(`用語 ${t.t}: 説明がない`);
 });
+// 用語のタップ表示：別名が別の用語と衝突していないか
+const aliasOwner = {};
+FE_TERMS.forEach((t) => {
+  t.t.split(/\s*\/\s*/).concat(t.al || []).forEach((n) => {
+    if (aliasOwner[n] && aliasOwner[n] !== t.t) errors.push(`用語の別名「${n}」が「${aliasOwner[n]}」と「${t.t}」で重複`);
+    aliasOwner[n] = t.t;
+  });
+});
 for (const [k, g] of Object.entries(FE_DRILLS)) {
   if (!cats.has(g.cat)) errors.push(`ドリル ${k}: 不明な分野`);
   for (let i = 0; i < 500; i++) {

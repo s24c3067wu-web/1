@@ -277,3 +277,26 @@ textarea.mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, mo
 
 .pdfwrap { margin: 8px 0; }
 .pdfbox canvas.pdfpage { display: block; width: 100%; background: #fff; border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; }
+
+/* 用語のタップ表示 */
+.term {
+  text-decoration: underline dotted var(--primary); text-decoration-thickness: 1.5px; text-underline-offset: 3px;
+  cursor: pointer; border-radius: 3px;
+}
+.term:hover, .term:focus-visible { background: var(--primary-weak); outline: none; }
+#termpop { position: fixed; inset: 0; z-index: 60; display: none; }
+#termpop.show { display: block; }
+#termpop .tp-back { position: absolute; inset: 0; background: rgba(10, 14, 25, .45); }
+#termpop .tp-sheet {
+  position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: 100%; max-width: 560px; max-height: 75vh; overflow-y: auto;
+  background: var(--surface); color: var(--text); border-radius: 18px 18px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -6px 24px rgba(0, 0, 0, .2);
+  animation: tp-up .18s ease-out;
+}
+@media (min-width: 600px) {
+  #termpop .tp-sheet { bottom: auto; top: 50%; transform: translate(-50%, -50%); border-radius: 18px; animation: none; }
+}
+@keyframes tp-up { from { transform: translate(-50%, 30px); opacity: .4; } to { transform: translate(-50%, 0); opacity: 1; } }
+#termpop .tp-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+#termpop .tp-body { white-space: pre-wrap; }
